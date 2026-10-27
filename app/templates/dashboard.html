@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%2308746d%27/%3E%3Cpath d=%27M16 8v16M8 16h16%27 stroke=%27white%27 stroke-width=%273%27/%3E%3C/svg%3E">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard | HealthGuard IoT</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
+    <script src="{{ url_for('static', path='/vendor/chart.umd.min.js') }}" defer></script>
+    <script src="{{ url_for('static', path='/js/dashboard.js') }}" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="/dashboard"><span class="brand-cross" aria-hidden="true">+</span> HealthGuard IoT</a>
+        <span class="header-label">Doctor Monitoring Portal</span>
+        <form id="logout-form" method="post" action="/logout"><button class="secondary" type="submit">Logout</button></form>
+    </header>
+    <main class="dashboard">
+        <p class="subtitle">Welcome, {{ doctor_name }}</p>
+        <h1>Patient monitoring</h1>
+        <p class="intro">Your patients. Their latest readings, in one place.</p>
+        {% if patients %}
+        {% set selected = patients[0] %}
+        {% set reading = selected.reading %}
+        <div class="monitor-layout">
+            <aside class="patient-panel" aria-label="Assigned patients">
+                <div class="panel-heading"><h2>Patient Overview</h2><span class="count">{{ patients|length }}</span></div>
+                <p class="muted">Assigned to your care · Unselected patients show saved snapshots. Recent demo alert counts match the panel (up to 10).</p>
+                <div class="patient-list">
+                {% for patient in patients %}
+                    <button class="patient-button" data-patient-id="{{ patient.id }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">
+                        <span class="overview-heading"><strong>{{ patient.name }}</strong><span class="overview-selected">{{ 'Monitoring' if loop.first else 'Monitor Patient' }}</span></span>
+                        <small>{{ patient.age }} years · {{ patient.gender }} · Patient #{{ patient.id }}</small>
+                        <span class="overview-vitals">{% if patient.reading %}HR {{ patient.reading.heart_rate }} bpm · SpO₂ {{ '%g'|format(patient.reading.spo2) }}% · Temp {{ '%.1f'|format(patient.reading.temperature_c) }} °C{% else %}No readings yet{% endif %}</span>
+                        <span class="overview-time">Latest reading: <time{% if patient.reading %} datetime="{{ patient.reading.recorded_at }}"{% endif %}>{{ patient.reading.recorded_at if patient.reading else 'No readings yet' }}</time></span>
+                        <span class="overview-alerts">Recent demo alerts: <span class="overview-alert-count">{{ patient.alert_count }}</span> <small>(up to 10)</small></span>
+                    </button>
+                {% endfor %}
+                </div>
+            </aside>
+            <section class="monitor-panel" aria-label="Patient monitoring">
+                <div class="monitor-heading">
+                    <div><p class="eyebrow">SELECTED PATIENT</p><h2 id="patient-name">{{ selected.name }}</h2><p id="patient-detail" class="muted">Patient #{{ selected.id }} · {{ selected.age }} years · {{ selected.gender }}</p></div>
+                    <div class="monitor-statuses">
+                        <div><span class="status-label">Live connection</span><span id="connection-status" class="connection-status" data-state="disconnected" role="status">Disconnected</span></div>
+                        <div><span class="status-label">Data freshness</span><span id="data-freshness" class="freshness-status" data-state="unknown" role="status">Unknown</span></div>
+                    </div>
+                </div>
+                <div class="vital-grid" aria-live="polite" aria-atomic="true">
+                    <article class="vital-card">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c4-5-3-12-8-6-5-6-12 1-8 6l8 8z"/><path d="M3 12h5l2-4 3 8 2-4h6"/></svg>
+                        <h3>Heart Rate</h3><p><span id="heart-rate" class="vital-value">{{ reading.heart_rate if reading else '—' }}</span> <span class="unit">bpm</span></p>
+                    </article>
+                    <article class="vital-card">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s-7 8-7 12a7 7 0 0 0 14 0c0-4-7-12-7-12z"/><path d="M8 15a4 4 0 0 0 4 4"/></svg>
+                        <h3>Blood Oxygen (SpO₂)</h3><p><span id="spo2" class="vital-value">{{ '%g'|format(reading.spo2) if reading else '—' }}</span> <span class="unit">%</span></p>
+                    </article>
+                    <article class="vital-card">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14V5a3 3 0 0 1 6 0v9a5 5 0 1 1-6 0z"/><path d="M12 9v9m5-12h3m-3 4h2"/></svg>
+                        <h3>Body Temperature</h3><p><span id="temperature" class="vital-value">{{ '%.1f'|format(reading.temperature_c) if reading else '—' }}</span> <span class="unit">°C</span></p>
+                    </article>
+                </div>
+                <p id="reading-state" class="reading-state" role="status">{{ '' if reading else 'No readings available for this patient yet.' }}</p>
+                <div class="reading-footer"><span>Last updated: <time id="last-updated"{% if reading %} datetime="{{ reading.recorded_at }}"{% endif %}>{{ reading.recorded_at if reading else 'No readings received yet' }}</time></span><span>Via patient sensor stream</span></div>
+                <section class="trends" aria-labelledby="trends-title">
+                    <h2 id="trends-title">Live Vital Trends</h2>
+                    <p class="muted">Latest 20 measurements · Local measurement time</p>
+                    <p id="chart-state" class="reading-state" role="status">Loading recent readings…</p>
+                    <div class="chart-grid">
+                        {% for key, title, unit in [('heart_rate', 'Heart Rate', 'bpm'), ('spo2', 'Blood Oxygen (SpO₂)', '%'), ('temperature_c', 'Body Temperature', '°C')] %}
+                        <article class="chart-card">
+                            <h3 id="{{ key }}-title">{{ title }} <span class="unit">{{ unit }}</span></h3>
+                            <div class="chart-container"><canvas id="chart-{{ key }}" role="img" aria-labelledby="{{ key }}-title" aria-describedby="chart-state">Recent {{ title }} measurements. The latest value appears in the vital card above.</canvas></div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                </section>
+                <section class="fuzzy-panel" aria-labelledby="fuzzy-title">
+                    <h2 id="fuzzy-title">Fuzzy Monitoring Assessment</h2>
+                    <p class="muted">ACADEMIC DEMONSTRATION ONLY — NOT CLINICALLY VALIDATED. NOT MEDICAL ADVICE. Not a diagnosis.</p>
+                    <p id="fuzzy-state" class="reading-state" role="status">Calculating fuzzy assessment...</p>
+                    <div id="fuzzy-content" hidden>
+                        <div class="fuzzy-summary"><p>Overall demo status: <strong id="fuzzy-status"></strong></p><p>Demo risk score: <strong id="fuzzy-score"></strong> / 100</p></div>
+                        <p class="muted">Evaluated measurement: <time id="fuzzy-time"></time>. Assessment does not indicate data freshness; check the freshness indicator above.</p>
+                        <div id="fuzzy-outputs" class="fuzzy-bars" aria-label="Output memberships"></div>
+                        <p class="muted">Memberships are rule activation degrees, not probabilities; they need not sum to 100%.</p>
+                        <details><summary>Input memberships</summary><div id="fuzzy-inputs" class="fuzzy-inputs"></div></details>
+                    </div>
+                </section>
+                <section class="demo-alerts" aria-labelledby="alerts-title">
+                    <div class="panel-heading"><h2 id="alerts-title">Demo Alerts</h2><span id="alert-count" class="count" aria-label="Displayed alerts">0</span></div>
+                    <p class="muted">Academic demo alerts only — not clinically validated. Not clinical guidance.</p>
+                    <p id="alert-state" class="reading-state" role="status">Loading alerts…</p>
+                    <ul id="alert-list" class="alert-list" aria-label="Stored demo alerts"></ul>
+                </section>
+                <section class="reading-history" aria-labelledby="history-title">
+                    <h2 id="history-title">Recent Readings</h2>
+                    <p class="muted">Latest 20 stored measurements · Newest first · Local measurement time</p>
+                    <p id="history-state" class="reading-state" role="status">Loading recent readings…</p>
+                    <div class="history-scroll" role="region" aria-label="Recent reading measurements" tabindex="0">
+                        <table aria-labelledby="history-title">
+                            <thead><tr><th scope="col">Time</th><th scope="col">Heart Rate</th><th scope="col">SpO₂</th><th scope="col">Temperature</th></tr></thead>
+                            <tbody id="history-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+                <p class="monitor-note">Latest readings are shown in real time. Connection status indicates the browser stream, not how recently a measurement was taken.</p>
+            </section>
+        </div>
+        {% else %}
+        <section class="placeholder"><h2>No patients assigned to your account.</h2><p>Your assigned patients will appear here when available.</p></section>
+        {% endif %}
+        <p class="demo-note">Academic demonstration · Simulator values are synthetic and are not clinical data.</p>
+        <noscript><p class="error">Enable JavaScript for patient selection and live updates. The values above are a saved snapshot.</p></noscript>
+    </main>
+    <script id="dashboard-data" type="application/json">{{ patients|tojson }}</script>
+</body>
+</html>
